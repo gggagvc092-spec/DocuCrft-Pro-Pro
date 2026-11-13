@@ -10888,200 +10888,74 @@ def main():
     _render_route(uid, settings)
 
 # ============================================================
-# 🚀 الحزمة الشاملة للإصلاح (النسخة المعتمدة - ضعها قبل main مباشرة)
+# 🚀 إصلاح الذكاء الاصطناعي وإخفاء الكيبورد (النسخة النهائية)
 # ============================================================
 import time
 
-# 1. الدوال المفقودة التي تسببت في الأخطاء
-def _require_api_key(settings):
-    key = resolve_api_key(settings)
-    if not key:
-        st.warning("⚠️ AI غير مفعّل — أضف مفتاح Gemini من الإعدادات")
-        return None
-    return key
-
-def _rate_limit_or_warn(action, max_per_minute):
-    try:
-        if _check_rate_limit(action, max_per_minute):
-            return True
-    except Exception:
-        return True
-    st.warning(f"⚠️ تجاوزت الحد ({max_per_minute} طلب/دقيقة) — انتظر قليلاً")
-    return False
-
-# 2. إصلاح دالة التصدير (لأنها ظهرت في الأخطاء)
-def export_document(doc, formatted, fmt="pdf"):
-    safe_title = safe_filename(doc.get("title") or "مستند")
-    extensions = {"pdf": ".pdf", "docx": ".docx", "pptx": ".pptx", "html": ".html", "md": ".md", "txt": ".txt"}
-    if fmt == "pdf": data, warns = export_pdf(doc, formatted)
-    elif fmt == "docx": data, warns = export_docx(doc, formatted)
-    elif fmt == "pptx": data, warns = export_pptx(doc, formatted)
-    elif fmt == "html": data, warns = export_html(doc, formatted, embed_images=True)
-    elif fmt == "md": data, warns = export_md(doc, formatted)
-    elif fmt == "txt": data, warns = export_txt(doc, formatted)
-    else: raise ValueError(f"صيغة غير مدعومة: {fmt}")
-    return data, warns, safe_title + extensions.get(fmt, "." + fmt)
-
-# 3. إصلاح خطأ أزرار المراجعة (الذي ظهر في صورتك)
-def _review_rating_buttons(key_prefix=None, prefix=None, on_rate=None):
-    kp = key_prefix or prefix
-    colors = ["#DC2626", "#F59E0B", "#10B981", "#059669"]
-    cols = st.columns(4)
-    for i, (label, color) in enumerate(zip(REVIEW_LABELS, colors)):
-        with cols[i]:
-            if st.button(label, key=f"{kp}_r{i}", use_container_width=True):
-                if on_rate:
-                    on_rate(i)
-                st.rerun()
-
-# 4. تحديث محرك الذكاء الاصطناعي (أسرع وحل مشكلة "الخدمة مشغولة")
+# 1. محرك ذكاء اصطناعي ذكي (يجرب الموديلات ويرجع سبب الخطأ الفعلي)
 def _ai_call(api_key, prompt, system="", json_mode=False, max_retries=3, internal=False):
     if not _ai_available(api_key):
-        return "⚠️ محرك الذكاء غير مفعّل."
-    if not internal and not _check_rate_limit("ai", 15):
-        return "⚠️ تجاوزت 15 طلب/دقيقة — انتظر."
+        return "⚠️ محرك الذكاء غير مفعّل. أضف مفتاح API من الإعدادات."
+    
+    # نجرب الموديلات بالترتيب (1.5-flash هو الأكثر استقراراً)
+    models_to_try = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"]
     
     full = (system + "\n\n" + prompt) if system else prompt
     if json_mode: full += "\n\n⚠️ أعد الرد كـ JSON صحيح فقط."
     
-    for attempt in range(max_retries):
-        try:
-            if _HAS_GENAI_NEW:
-                client = genai_new.Client(api_key=str(api_key).strip())
-                config = {"response_mime_type": "application/json"} if json_mode else None
-                # استخدام موديل 2.0-flash الأسرع بكثير
-                resp = client.models.generate_content(model="gemini-2.0-flash", contents=full, config=config)
-                text = (getattr(resp, "text", "") or "").strip()
-            else:
-                model = genai_old.GenerativeModel("gemini-2.0-flash")
-                resp = model.generate_content(full)
-                text = (resp.text or "").strip()
-            return text if text else "⚠️ لم يصل رد."
-        except Exception as e:
-            err = str(e).lower()
-            if "429" in err or "quota" in err or "resource_exhausted" in err:
-                if attempt < max_retries - 1:
-                    time.sleep(4)
-                    continue
-                return "⚠️ الخدمة مشغولة. انتظر دقيقة وحاول."
-            time.sleep(2)
-    return "⚠️ حدث خطأ في الاتصال بالذكاء الاصطناعي."
-
-# 5. إصلاح توليد الصور ليعمل فوراً لكل الأقسام (بديل Wikimedia البطيء)
-def get_section_image(heading, keyword_override=""):
-    keyword = _extract_image_keyword(keyword_override or heading or "")
-    if not keyword:
-        return "https://placehold.co/800x400/EEF2FF/4F46E5?text=DocuCraft"
-    safe_kw = keyword.replace(" ", "+")
-    return f"https://placehold.co/800x400/EEF2FF/4F46E5?text={safe_kw}"
-
-# 6. إضافة التمييز المباشر (Pills) فوق كل فقرة
-def _render_translate_panel(uid, did, sec_id, section_name, context, api_key):
-    st.markdown("---")
-    st.caption("💡 اضغط على أي كلمة بالأسفل للترجمة أو التمييز المباشر:")
-    try:
-        kws = keyword_counts(context, 1)[:15]
-        words = [kw[0] for kw in kws if kw[0].strip()]
-    except Exception:
-        words = []
-
-    selected_word = None
-    if words:
-        try:
-            # أداة Pills (حديثة) تتيح الضغط المباشر على الكلمة
-            selected_word = st.pills("اختر كلمة:", options=words, selection_mode="single", key=f"pills_{sec_id}")
-        except AttributeError:
-            # بديل لو الإصدار قديم
-            sel = st.selectbox("اختر كلمة:", ["—"] + words, key=f"pills_sel_{sec_id}")
-            if sel != "—": selected_word = sel
-        
-    if selected_word:
-        tr_key = f"tr_out_{sec_id}_{selected_word}"
-        if tr_key not in st.session_state:
-            with st.spinner(f"ترجمة {selected_word}…"):
-                tr = ai_translate_word(api_key, selected_word, context[:600])
-                st.session_state[tr_key] = tr
-        
-        tr = st.session_state[tr_key]
-        _render_translation_card(uid, selected_word, tr, sec_id, api_key, context)
-        
-        # أزرار التمييز والإضافة
-        c1, c2 = st.columns(2)
-        if c1.button("🖍️ تمييز الكلمة", key=f"hl_{sec_id}_{selected_word}"):
-            add_highlight(did, selected_word, "#FEF08A")
-            toast_ok("تم التمييز")
-        if c2.button("📝 إضافة لملاحظة", key=f"nt_{sec_id}_{selected_word}"):
-            add_note(did, f"كلمة: {selected_word} - الترجمة: {tr.get('translation')}")
-            toast_ok("تمت الإضافة لملاحظاتك")
-
-    custom = st.text_input("أو اكتب كلمة:", key=f"cw_{sec_id}", placeholder="اكتب كلمة هنا...")
-    if st.button("🔍 ترجم", key=f"tc_{sec_id}") and custom.strip():
-        if _rate_limit_or_warn("translate", 20):
-            with st.spinner(f"ترجمة {custom}…"):
-                tr = ai_translate_word(api_key, custom.strip(), context[:600])
-            st.session_state[f"tr_out_{sec_id}_{custom}"] = tr
-            _render_translation_card(uid, custom.strip(), tr, sec_id, api_key, context)
-
-# 7. إصلاح حفظ إعدادات التنسيق (استخدام form لضمان الحفظ)
-def _tab_format(uid, did, doc, settings):
-    formatted = doc.get("formatted_data") or {}
-    sections = formatted.get("sections", []) or []
-
-    st.markdown("### 🎨 إعدادات الصفحة")
-    with st.form("format_form"):
-        c1, c2, c3 = st.columns(3)
-        page_size = c1.selectbox("مقاس الصفحة", PAGE_SIZES, index=PAGE_SIZES.index(doc.get("page_size", "A4")) if doc.get("page_size") in PAGE_SIZES else 0, key=f"fmt_ps_{did}")
-        font = c2.selectbox("الخط", ALL_FONTS, index=ALL_FONTS.index(doc.get("font", "Cairo")) if doc.get("font") in ALL_FONTS else 0, key=f"fmt_font_{did}")
-        alignment = c3.selectbox("المحاذاة", list(TEXT_ALIGNMENTS.keys()), index=list(TEXT_ALIGNMENTS.keys()).index(doc.get("alignment", "right")) if doc.get("alignment") in TEXT_ALIGNMENTS else 0, key=f"fmt_align_{did}")
-
-        c1, c2, c3 = st.columns(3)
-        text_color = c1.color_picker("لون النص", doc.get("text_color") or "#111111", key=f"fmt_tc_{did}")
-        brand_color = c2.color_picker("لون الهوية", doc.get("brand_color") or "#4F46E5", key=f"fmt_bc_{did}")
-        bg_color = c3.color_picker("خلفية الصفحة", doc.get("bg_color") or "#FFFFFF", key=f"fmt_bgc_{did}")
-        watermark = st.text_input("العلامة المائية", value=doc.get("watermark", ""), key=f"fmt_wm_{did}")
-
-        st.markdown("**مفاتيح الصفحات:**")
-        c1, c2, c3 = st.columns(3)
-        cover = c1.toggle("غلاف", value=bool(doc.get("cover_enabled", 1)), key=f"fmt_cov_{did}")
-        summary_t = c2.toggle("خلاصة", value=bool(doc.get("summary_enabled", 1)), key=f"fmt_sum_{did}")
-        index_t = c3.toggle("فهرس", value=bool(doc.get("index_enabled", 1)), key=f"fmt_idx_{did}")
-        c1, c2, c3 = st.columns(3)
-        concepts_t = c1.toggle("مفاهيم", value=bool(doc.get("concepts_enabled", 1)), key=f"fmt_con_{did}")
-        hf_t = c2.toggle("رأس/تذييل", value=bool(doc.get("header_footer_enabled", 1)), key=f"fmt_hf_{did}")
-        closing_t = c3.toggle("صفحة ختامية", value=bool(doc.get("closing_enabled", 1)), key=f"fmt_cls_{did}")
-
-        if st.form_submit_button("💾 حفظ الإعدادات", type="primary", use_container_width=True):
+    last_err_msg = "خطأ غير معروف"
+    
+    for model_name in models_to_try:
+        for attempt in range(max_retries):
             try:
-                update_document(did, uid, page_size=page_size, font=font, alignment=alignment,
-                                text_color=text_color, brand_color=brand_color, bg_color=bg_color, 
-                                watermark=watermark.strip(), cover_enabled=int(cover), 
-                                summary_enabled=int(summary_t), index_enabled=int(index_t), 
-                                concepts_enabled=int(concepts_t), header_footer_enabled=int(hf_t), 
-                                closing_enabled=int(closing_t))
-                _notify_and_rerun("تم حفظ الإعدادات", toast_msg="✅ محفوظ", icon="✅")
+                if _HAS_GENAI_NEW:
+                    client = genai_new.Client(api_key=str(api_key).strip())
+                    config = {"response_mime_type": "application/json"} if json_mode else None
+                    resp = client.models.generate_content(model=model_name, contents=full, config=config)
+                    text = (getattr(resp, "text", "") or "").strip()
+                    if text: return text
+                elif _HAS_GENAI_OLD:
+                    model = genai_old.GenerativeModel(model_name)
+                    resp = model.generate_content(full)
+                    text = (resp.text or "").strip()
+                    if text: return text
             except Exception as e:
-                st.error(f"⚠️ خطأ: {e}")
+                err_lower = str(e).lower()
+                last_err_msg = str(e)
+                
+                # إذا كان الخطأ 404 (الموديل غير موجود) ننتقل للموديل التالي
+                if "404" in err_lower or "not found" in err_lower:
+                    break 
+                    
+                # إذا كان الخطأ 429 (تجاوزنا الحد) ننتظر ونعيد المحاولة
+                if "429" in err_lower or "quota" in err_lower or "resource_exhausted" in err_lower:
+                    if attempt < max_retries - 1:
+                        time.sleep(5) # انتظار 5 ثوانٍ
+                        continue
+                    return "⚠️ الخدمة مشغولة (تجاوزت حد الطلبات). انتظر دقيقة."
+                
+                # إذا كان المفتاح خطأ
+                if "api key" in err_lower or "unauthorized" in err_lower or "invalid" in err_lower:
+                    return f"⚠️ مفتاح API غير صالح: {last_err_msg[:60]}"
+                    
+                time.sleep(2)
+    
+    return f"⚠️ فشل الاتصال: {last_err_msg[:100]}"
 
-    if sections:
-        st.markdown("### 🖼️ صور الأقسام")
-        scope = st.radio("النطاق", ["كل الأقسام", "نصف الأقسام", "٣ صور فقط", "قسم محدد"], horizontal=True, key=f"scope_{did}")
-        if st.button("🎨 توليد الصور", type="primary", key=f"gen_img_{did}"):
-            with st.spinner("جارٍ التوليد…"):
-                for i, sec in enumerate(sections):
-                    sec["image_url"] = get_section_image(sec.get("heading", ""))
-                formatted["sections"] = sections
-                update_document(did, uid, formatted_data=formatted)
-            _notify_and_rerun("تم توليد الصور", toast_msg="✅", icon="✅")
-
-# 8. تحديث الشريط الجانبي وإخفاء كلمة keyboard_ar
+# 2. دالة الشريط الجانبي (لتحديث الشعار وإخفاء الكيبورد بقوة)
 _original_sidebar = render_sidebar
 def render_sidebar(uid, settings):
     _original_sidebar(uid, settings)
     st.markdown("""
     <style>
-    /* إخفاء كلمة keyboard_ar المزعجة */
-    [data-testid="stTextInput"] > div > div > div > div > span { display: none !important; }
-    [data-testid="stTextArea"] > div > div > div > div > span { display: none !important; }
+    /* إخفاء كلمة keyboard_ar المزعجة في الموبايل */
+    [data-testid="stTextInput"] span, 
+    [data-testid="stTextArea"] span,
+    div[data-baseweb="input"] span,
+    div[data-baseweb="textarea"] span { 
+        display: none !important; 
+        visibility: hidden !important;
+    }
     
     /* استبدال الإيموجي بالصورة logo.png */
     .sidebar-brand div:first-child {
