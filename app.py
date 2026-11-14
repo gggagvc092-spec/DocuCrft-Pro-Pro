@@ -10913,8 +10913,6 @@ try:
     GEMINI_API_KEYS = st.secrets["GEMINI_API_KEYS"]
 except Exception:
     GEMINI_API_KEYS = []
-]
-
 _key_lock = threading.Lock()
 _key_index = 0
 
