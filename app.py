@@ -10897,25 +10897,22 @@ def main():
 
 
 # ============================================================
-# 🚀 الحزمة النهائية المضمونة (v11): 8 مفاتيح + توزيع مهام + إصلاحات جذرية
+# 🚀 الحزمة النهائية المطلقة (v13): ذكاء اصطناعي خارق + صور حقيقية
 # ============================================================
 import time
 import random
 import threading
 import concurrent.futures
+import hashlib
 
 # ------------------------------------------------------------
-# 1. إعداد خزان المفاتيح الثمانية
+# 1. خزان المفاتيح الثمانية (ضع مفاتيحك هنا بدلاً من النص)
 # ------------------------------------------------------------
-GEMINI_API_KEYS = [
-    "ضع_المفتاح_1_هنا",
-    "ضع_المفتاح_2_هنا",
-    "ضع_المفتاح_3_هنا",
-    "ضع_المفتاح_4_هنا",
-    "ضع_المفتاح_5_هنا",
-    "ضع_المفتاح_6_هنا",
-    "ضع_المفتاح_7_هنا",
-    "ضع_المفتاح_8_هنا",
+# قراءة المفاتيح بأمان من إعدادات Streamlit
+try:
+    GEMINI_API_KEYS = st.secrets["GEMINI_API_KEYS"]
+except Exception:
+    GEMINI_API_KEYS = []
 ]
 
 _key_lock = threading.Lock()
@@ -10931,53 +10928,47 @@ def get_next_api_key():
         return key
 
 # ------------------------------------------------------------
-# 2. دالة الاتصال الأساسية (Thread-Safe مع تبديل الموديل)
+# 2. محرك الاتصال الذكي (يجرب كل الموديلات وكل المفاتيح)
 # ------------------------------------------------------------
 def _ai_call_threadsafe(prompt, system="", json_mode=False, max_retries=8):
     full = (system + "\n\n" + prompt) if system else prompt
     if json_mode: full += "\n\n⚠️ أعد الرد كـ JSON صحيح فقط."
     
-    last_error = ""
+    # قائمة الموديلات (إذا كان الأول محظوراً، يجرب الثاني والثالث)
+    models_to_try = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    last_error_msg = "لا يوجد اتصال"
+    
     for attempt in range(max_retries):
         key = get_next_api_key()
         if not key:
             return "⚠️ الرجاء وضع مفاتيح API الثمانية في الكود (GEMINI_API_KEYS)."
             
+        current_model = models_to_try[attempt % len(models_to_try)]
+        
         try:
             if _HAS_GENAI_NEW:
                 client = genai_new.Client(api_key=key)
                 config = {"response_mime_type": "application/json"} if json_mode else None
-                
-                # المحاولة بموديل 1.5-flash (الأسرع)
-                try:
-                    resp = client.models.generate_content(model="gemini-1.5-flash", contents=full, config=config)
-                except Exception as model_err:
-                    if "404" in str(model_err):
-                        # إذا كان محظوراً في الشبكة، جرب gemini-pro
-                        resp = client.models.generate_content(model="gemini-pro", contents=full, config=config)
-                    else:
-                        raise model_err
-                        
+                resp = client.models.generate_content(model=current_model, contents=full, config=config)
                 text = (getattr(resp, "text", "") or "").strip()
                 if text: return text
-                
         except Exception as e:
-            last_error = str(e).lower()
-            if "429" in last_error or "quota" in last_error:
-                time.sleep(1.5) 
+            err_msg = str(e).lower()
+            last_error_msg = str(e)
+            
+            # خطأ 429 أو 404 أو تجاوز الحد: انتظر وجرب مفتاح وموديل آخر
+            if "429" in err_msg or "404" in err_msg or "quota" in err_msg:
+                time.sleep(1.5 + (random.random() * 0.5)) # وقت انتظار عشوائي
                 continue
-            elif "401" in last_error or "api key" in last_error:
-                continue
-            else:
-                time.sleep(1)
-                continue
-                
-    return f"⚠️ فشلت جميع المحاولات. آخر خطأ: {last_error[:50]}"
+            elif "401" in err_msg or "api key" in err_msg:
+                continue # جرب المفتاح التالي فوراً
+            
+    return f"⚠️ فشل الاتصال بعد {max_retries} محاولات. (السبب: {last_error_msg[:50]})"
 
 _ai_call = _ai_call_threadsafe
 
 # ------------------------------------------------------------
-# 3. تلخيص النصوص الطويلة (توزيع المهام المتوازي)
+# 3. التلخيص المتوازي (توزيع المهام على 8 طلبات في نفس الوقت)
 # ------------------------------------------------------------
 def ai_summarize_long_parallel(api_key, text, points=6, progress_cb=None):
     chunks = split_long_text(text, MAX_AI_CHUNK)
@@ -10986,7 +10977,7 @@ def ai_summarize_long_parallel(api_key, text, points=6, progress_cb=None):
 
     partials = []
     failed = 0
-    if progress_cb: progress_cb(0, len(chunks), "بدء التلخيص المتوازي (8 مفاتيح)...")
+    if progress_cb: progress_cb(0, len(chunks), "بدء التلخيص المتوازي...")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
         future_to_chunk = {executor.submit(_ai_call_threadsafe, f"لخّص هذا الجزء في 3 نقاط:\n\n{c}"): i for i, c in enumerate(chunks)}
@@ -11003,9 +10994,9 @@ def ai_summarize_long_parallel(api_key, text, points=6, progress_cb=None):
                 failed += 1
 
     if not partials:
-        return {"summary": "⚠️ فشل التلخيص تماماً.", "failed": failed, "total": len(chunks)}
+        return {"summary": "⚠️ فشل التلخيص (تأكد من صحة المفاتيح).", "failed": failed, "total": len(chunks)}
 
-    if progress_cb: progress_cb(len(chunks), len(chunks), "دمج الملخصات...")
+    if progress_cb: progress_cb(len(chunks), len(chunks), "دمج الملخصات النهائية...")
     merged = "\n\n".join(partials)
     final_summary = _ai_call_threadsafe(f"لخّص هذه النقاط في {points} نقاط نهائية:\n\n{merged[:MAX_AI_CHUNK]}")
     return {"summary": final_summary, "failed": failed, "total": len(chunks)}
@@ -11013,35 +11004,40 @@ def ai_summarize_long_parallel(api_key, text, points=6, progress_cb=None):
 ai_summarize_long = ai_summarize_long_parallel
 
 # ------------------------------------------------------------
-# 4. إصلاح الصور (LoremFlickr)
+# 4. إصلاح الصور (Picsum - صور حقيقية مضمونة ولن تظهر بيضاء)
 # ------------------------------------------------------------
 def get_section_image_fixed(heading, keyword_override=""):
     keyword = _extract_image_keyword(keyword_override or heading or "")
-    if not keyword: keyword = "book,writing,office"
-    return f"https://loremflickr.com/800/400/{keyword.replace(' ', ',')}?lock={random.randint(1, 1000)}"
+    if not keyword: keyword = "document"
+    seed = hashlib.md5(keyword.encode('utf-8')).hexdigest()[:8]
+    # خدمة Picsum تجلب صوراً حقيقية سريعة جداً
+    return f"https://picsum.photos/seed/{seed}/800/400"
 
 get_section_image = get_section_image_fixed
 
 # ------------------------------------------------------------
-# 5. إصلاح واجهة المستخدم (الخطوط + keyboard_ar)
+# 5. إخفاء keyboard_ar وإصلاح الخطوط
 # ------------------------------------------------------------
 _original_apply_theme = apply_theme
 def apply_theme(settings):
     _original_apply_theme(settings)
     st.markdown("""
     <style>
-    /* إخفاء كلمة keyboard_ar الحقيقية في Streamlit */
+    /* إخفاء كلمة keyboard_ar المزعجة */
     [data-testid="InputInstructions"] { display: none !important; }
-    /* إصلاح تداخل الخطوط في الموبايل */
+    /* إصلاح الخطوط العربية */
     * { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
-    .stTextInput input, .stTextArea textarea { font-family: 'Cairo', sans-serif !important; line-height: 1.6 !important; }
-    /* ضبط اتجاه النص العربي */
-    .stTextInput input, .stTextArea textarea { direction: rtl; text-align: right; }
+    .stTextInput input, .stTextArea textarea { 
+        font-family: 'Cairo', sans-serif !important; 
+        line-height: 1.6 !important; 
+        direction: rtl; 
+        text-align: right; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
 # ------------------------------------------------------------
-# 6. تبويب التنسيق (حفظ فوري + توليد صور متسلسل لتجنب التعليق)
+# 6. تبويب التنسيق (حفظ فوري + صور متسلسلة)
 # ------------------------------------------------------------
 def _tab_format(uid, did, doc, settings):
     formatted = doc.get("formatted_data") or {}
@@ -11049,7 +11045,6 @@ def _tab_format(uid, did, doc, settings):
     
     st.markdown("### 🎨 إعدادات الصفحة")
     
-    # وضع الإعدادات في Form لمنع مشكلة عدم الحفظ
     with st.form("format_form"):
         c1, c2, c3 = st.columns(3)
         page_size = c1.selectbox("مقاس الصفحة", PAGE_SIZES, index=PAGE_SIZES.index(doc.get("page_size", "A4")) if doc.get("page_size") in PAGE_SIZES else 0, key=f"fmt_ps_{did}")
@@ -11072,7 +11067,6 @@ def _tab_format(uid, did, doc, settings):
         hf_t = c2.toggle("رأس/تذييل", value=bool(doc.get("header_footer_enabled", 1)), key=f"fmt_hf_{did}")
         closing_t = c3.toggle("صفحة ختامية", value=bool(doc.get("closing_enabled", 1)), key=f"fmt_cls_{did}")
         
-        # زر الحفظ
         if st.form_submit_button("💾 حفظ الإعدادات", type="primary", use_container_width=True):
             try:
                 update_document(did, uid, page_size=page_size, font=font, alignment=alignment,
@@ -11085,7 +11079,6 @@ def _tab_format(uid, did, doc, settings):
             except Exception as e:
                 st.error(f"⚠️ خطأ: {e}")
 
-    # قسم الصور (خارج الـ Form حتى يتمكن المستخدم من رؤية التحديث فوراً)
     if sections:
         st.markdown("### 🖼️ صور الأقسام")
         if st.button("🎨 توليد الصور لكل الأقسام", type="primary", key=f"gen_imgs_{did}"):
@@ -11099,7 +11092,6 @@ def _tab_format(uid, did, doc, settings):
             progress.empty()
             _notify_and_rerun("تم توليد الصور", toast_msg="✅", icon="✅")
 
-    # خطة المراجعة
     st.divider()
     st.markdown("### 📅 المراجعة المتباعدة")
     try:
@@ -11167,7 +11159,7 @@ def _render_translate_panel(uid, did, sec_id, section_name, context, api_key):
             _render_translation_card(uid, custom.strip(), tr, sec_id, api_key, context)
 
 # ------------------------------------------------------------
-# 8. الدوال المفقودة (التصدير والمراجعة)
+# 8. الدوال المفقودة (التصدير والمراجعة والذكاء الاصطناعي)
 # ------------------------------------------------------------
 def _require_api_key(settings):
     return resolve_api_key(settings) or "⚠️"
@@ -11197,12 +11189,29 @@ def _review_rating_buttons(key_prefix=None, prefix=None, on_rate=None):
                 if on_rate: on_rate(i)
                 st.rerun()
 
+def ai_health_check(api_key):
+    test_key = get_next_api_key() or api_key
+    if not test_key:
+        return False, "لم يتم إضافة مفاتيح. اذهب للكود وضعها في GEMINI_API_KEYS"
+    try:
+        resp = _ai_call_threadsafe("قل: OK", max_retries=3)
+        if _is_ai_error(resp):
+            return False, resp
+        return True, f"نجح الاتصال! الرد: {resp[:20]}"
+    except Exception as e:
+        return False, f"فشل الاتصال: {str(e)}"
+
+def resolve_api_key(settings):
+    key = get_next_api_key()
+    if key:
+        return key
+    return (settings.get("gemini_api_key") or "").strip()
+
 # ============================================================
 # تشغيل التطبيق (يجب أن يكون هذا آخر شيء في الملف)
 # ============================================================
 if __name__ == "__main__":
     main()
-
 
 # ============================================================
 # نهاية الجزء 14/14 (v4 — نهائية مطلقة)
